@@ -60,10 +60,10 @@
       canvas.height = window.innerHeight;
 
       let gravitationalConstant = 0.0001; // Gravitational constant
-      const laserRange = 200; // Range of the laser from the rogue moon
-      const laserWidth = 3; // Width of the laser for visual representation
+      const laserRange = 100; // Range of the laser from the rogue moon
+      const laserWidth = 1; // Width of the laser for visual representation
       const agentSpeed = 0.9; // Speed of the cleaning agents
-      const particleCloudGenerationInterval = 50; // Interval (in frames) for generating new particle clouds
+      const particleCloudGenerationInterval = 10; // Interval (in frames) for generating new particle clouds
 
       let particleClouds = [];
       let rogueMoons = [];
@@ -71,95 +71,127 @@
       let framesSinceLastCloudGeneration = 0;
 
       class CelestialBody {
-          constructor(x, y, radius, mass, color, velocity) {
-              this.x = x;
-              this.y = y;
-              this.radius = radius;
-              this.mass = mass;
-              this.color = color;
-              this.velocity = velocity;
-              this.isRogueMoon = false; // Determines if the body is an agent
-              this.speed = 0.9; // Movement speed for chasing particles
-          }
+        constructor(x, y, radius, mass, color, velocity) {
+            this.x = x;
+            this.y = y;
+            this.radius = radius;
+            this.mass = mass;
+            this.color = color;
+            this.velocity = velocity;
+            this.isRogueMoon = false; // Determines if the body is an agent
+            this.speed = 0.9; // Movement speed for chasing particles
+            this.laserQueue = []; // Queue to store laser shots
+        }
 
-          draw() {
-              context.beginPath();
-              context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-              context.fillStyle = this.color;
-              context.fill();
-          }
+        draw() {
+            context.beginPath();
+            context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            context.fillStyle = this.color;
+            context.fill();
+        }
 
-          update() {
-              if (this.isRogueMoon) {
-                  // Find the nearest particle
-                  let nearestParticle = null;
-                  let nearestDistance = Infinity;
+        update() {
+            if (this.isRogueMoon) {
+                // Find the nearest particle
+                let nearestParticle = null;
+                let nearestDistance = Infinity;
 
-                  particleClouds.forEach(cloud => {
-                      cloud.particles.forEach(particle => {
-                          const deltaX = particle.x - this.x;
-                          const deltaY = particle.y - this.y;
-                          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                particleClouds.forEach(cloud => {
+                    cloud.particles.forEach(particle => {
+                        const deltaX = particle.x - this.x;
+                        const deltaY = particle.y - this.y;
+                        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-                          if (distance < nearestDistance) {
-                              nearestParticle = particle;
-                              nearestDistance = distance;
-                          }
-                      });
-                  });
+                        if (distance < nearestDistance) {
+                            nearestParticle = particle;
+                            nearestDistance = distance;
+                        }
+                    });
+                });
 
-                  // Chase the nearest particle if it exists
-                  if (nearestParticle) {
-                      const deltaX = nearestParticle.x - this.x;
-                      const deltaY = nearestParticle.y - this.y;
-                      const angle = Math.atan2(deltaY, deltaX);
+                // Chase the nearest particle if it exists
+                if (nearestParticle) {
+                    const deltaX = nearestParticle.x - this.x;
+                    const deltaY = nearestParticle.y - this.y;
+                    const angle = Math.atan2(deltaY, deltaX);
 
-                      this.velocity.x = Math.cos(angle) * this.speed;
-                      this.velocity.y = Math.sin(angle) * this.speed;
-                  }
-              }
+                    this.velocity.x = Math.cos(angle) * this.speed;
+                    this.velocity.y = Math.sin(angle) * this.speed;
+                }
+            }
 
-              // Update position based on velocity
-              this.x += this.velocity.x;
-              this.y += this.velocity.y;
+            // Update position based on velocity
+            this.x += this.velocity.x;
+            this.y += this.velocity.y;
 
-              // Keep the celestial body within the canvas boundaries
-              if (this.x < this.radius || this.x > canvas.width - this.radius) {
-                  this.velocity.x = -this.velocity.x;
-              }
-              if (this.y < this.radius || this.y > canvas.height - this.radius) {
-                  this.velocity.y = -this.velocity.y;
-              }
-              // Ensure the agent stays within the canvas bounds
-              if (this.isRogueMoon) {
-                  this.zapParticles();
-              }
-          }
+            // Keep the celestial body within the canvas boundaries
+            if (this.x < this.radius || this.x > canvas.width - this.radius) {
+                this.velocity.x = -this.velocity.x;
+            }
+            if (this.y < this.radius || this.y > canvas.height - this.radius) {
+                this.velocity.y = -this.velocity.y;
+            }
+
+            if (this.isRogueMoon) {
+                this.zapParticles(); // Fire lasers at particles
+                this.renderLasers(); // Render darting lasers with traveling segments
+            }
+        }
+
+        zapParticles() {
+            particleClouds = particleClouds.filter(cloud => {
+                cloud.particles = cloud.particles.filter(particle => {
+                    const deltaX = this.x - particle.x;
+                    const deltaY = this.y - particle.y;
+                    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+                    if (distance <= laserRange) {
+                        // Add to laser queue for delayed and segmented rendering
+                        this.laserQueue.push({
+                            startX: this.x,
+                            startY: this.y,
+                            endX: particle.x,
+                            endY: particle.y,
+                            progress: 0, // Start progress at 0
+                            speed: 0.05, // Speed of laser travel (adjustable)
+                            hit: false
+                        });
+                        return false; // Remove particle
+                    }
+                    return true;
+                });
+                return cloud.particles.length > 0;
+            });
+        }
+
+        renderLasers() {
+            // Render traveling lasers
+            this.laserQueue = this.laserQueue.filter(laser => {
+                // Calculate laser's current position based on progress
+                const { startX, startY, endX, endY, progress, speed } = laser;
+                const currentX = startX + (endX - startX) * progress;
+                const currentY = startY + (endY - startY) * progress;
+                const nextX = startX + (endX - startX) * Math.min(progress + 0.1, 1);
+                const nextY = startY + (endY - startY) * Math.min(progress + 0.1, 1);
+
+                // Draw short segment of the laser
+                context.beginPath();
+                context.moveTo(currentX, currentY);
+                context.lineTo(nextX, nextY);
+                context.strokeStyle = 'yellow';
+                context.lineWidth = 2;
+                context.stroke();
+
+                // Update progress
+                laser.progress += speed;
+
+                // Remove laser if it has completed its travel
+                return laser.progress < 1;
+            });
+        }
+    }
 
 
-
-
-          zapParticles() {
-              particleClouds = particleClouds.filter(cloud => {
-                  cloud.particles = cloud.particles.filter(particle => {
-                      const deltaX = this.x - particle.x;
-                      const deltaY = this.y - particle.y;
-                      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-                      if (distance <= laserRange) {
-                          context.beginPath();
-                          context.moveTo(this.x, this.y);
-                          context.lineTo(particle.x, particle.y);
-                          context.strokeStyle = 'green';
-                          context.lineWidth = laserWidth;
-                          context.stroke();
-                          return false;
-                      }
-                      return true;
-                  });
-                  return cloud.particles.length > 0;
-              });
-          }
-      }
 
       class ParticleCloud {
           constructor(x, y, radius, color) {
